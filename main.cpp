@@ -9,11 +9,16 @@
 #include <thread>
 
 #include <opencv2/opencv.hpp>
+#include <nlohmann/json.hpp>
 
 #include "../core/host_json_helper.hpp"
 #include "depthai_core.hpp"
 
+#include <websocketpp/config/asio_no_tls.hpp>
+#include <websocketpp/server.hpp>
+
 using namespace std::chrono;
+using json = nlohmann::json;
 
 typedef duration<double, std::ratio<1, 1000>> ms;
 
@@ -31,8 +36,67 @@ struct Detection
     int size;
 };
 
+void to_json(json& j, const Detection& d)
+{
+    j = json
+    {
+        {"label", d.label},
+        {"confidence", d.confidence},
+        {"left", d.left},
+        {"top", d.top},
+        {"right", d.right},
+        {"bottom", d.bottom},
+        {"center_x", d.center_x},
+        {"center_y", d.center_y},
+        {"distance_z", d.distance_z},
+        {"size", d.size},
+    };
+}
+
+typedef websocketpp::connection_hdl connection_hdl;
+typedef websocketpp::server<websocketpp::config::asio> server;
+typedef std::set<connection_hdl,std::owner_less<connection_hdl>> con_list;
+
+server ws_server;
+con_list ws_connections;
+
+void run_ws()
+{
+    ws_server.listen(8080);
+    ws_server.start_accept();
+
+    try
+    {
+        ws_server.run();
+    }
+    catch (const std::exception & e)
+    {
+        std::cout << e.what() << std::endl;
+    }
+}
+
+void on_open(connection_hdl hdl)
+{
+    ws_connections.insert(hdl);
+}
+
+void on_close(connection_hdl hdl)
+{
+    ws_connections.erase(hdl);
+}
+
 int main(int argc, char** argv)
 {
+    ws_server.clear_access_channels(websocketpp::log::alevel::all);
+    ws_server.set_access_channels(websocketpp::log::alevel::access_core);
+    ws_server.set_access_channels(websocketpp::log::alevel::app);
+    ws_server.init_asio();
+
+    ws_server.set_open_handler(&on_open);
+    ws_server.set_close_handler(&on_close);
+
+    std::thread ws_thread(&run_ws);
+
     auto json_fpath = "config.json";
 
     json json_obj;
@@ -120,24 +184,35 @@ int main(int argc, char** argv)
 
                 for (auto i = 0; i < detections.size(); i++)
                 {
-                    auto d = detections[i];
+                    auto d = &detections[i];
 
-                    if (d.size == 0)
+                    if (d->size == 0)
                     {
-                        d.left = d.left * width;
-                        d.top = d.top * height;
-                        d.right = d.right * width;
-                        d.bottom = d.bottom * height;
+                        d->left = d->left * width;
+                        d->top = d->top * height;
+                        d->right = d->right * width;
+                        d->bottom = d->bottom * height;
 
-                        d.center_x = (d.left + d.right) / 2.0;
-                        d.center_y = (d.top + d.bottom) / 2.0;
-                        d.size = static_cast<int>((d.right - d.left) * (d.bottom - d.top));
+                        d->center_x = (d->left + d->right) / 2.0;
+                        d->center_y = (d->top + d->bottom) / 2.0;
+                        d->size = static_cast<int>((d->right - d->left) * (d->bottom - d->top));
                     }
 
-                    cv::rectangle(color, cv::Point2f(d.left, d.top), cv::Point2f(d.right, d.bottom), cv::Scalar(23, 23, 255));
+                    cv::rectangle(color, cv::Point2f(d->left, d->top), cv::Point2f(d->right, d->bottom), cv::Scalar(23, 23, 255));
                 }
 
                 cv::imshow("previewout", color);
+            }
+        }
+
+        for (auto i = 0; i < detections.size(); i++)
+        {
+            auto d = detections[i];
+            json js = d;
+
+            for (con_list::iterator it = ws_connections.begin(); it != ws_connections.end(); ++it)
+            {
+                ws_server.send(*it, js.dump(), websocketpp::frame::opcode::text);
             }
         }
 
@@ -153,4 +228,6 @@ int main(int argc, char** argv)
     }
 
     deinit_device();
+
+    ws_thread.join();
 }

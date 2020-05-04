@@ -1,0 +1,6 @@
+[submodule "3rdparty/depthai-api"]
+	path = 3rdparty/depthai-api
+	url = git@github.com:luxonis/depthai-api.git
+[submodule "3rdparty/websocketpp"]
+	path = 3rdparty/websocketpp
+	url = git@github.com:zaphoyd/websocketpp.git
