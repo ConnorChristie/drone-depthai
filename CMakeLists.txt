@@ -12,10 +12,9 @@ add_definitions(-DUSE_USB_VSC) # for XLink communication
 # add_definitions(-DXLINK_USB_DATA_TIMEOUT=0)
 # add_definitions(-DXLINK_COMMON_TIMEOUT_MSEC=0)
 
-if(CMAKE_COMPILER_IS_GNUCXX)
-    set(CMAKE_CXX_FLAGS "-g -std=c++17 ${CMAKE_CXX_FLAGS}")
-    message(STATUS "optional:-std=c++17")
-endif(CMAKE_COMPILER_IS_GNUCXX)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_FLAGS "-std=c++17 ${CMAKE_CXX_FLAGS}")
 
 
 find_package(OpenCV REQUIRED )
@@ -33,6 +32,8 @@ include_directories(
 add_executable( ${APP_NAME}
     main.cpp
     depthai_core.cpp
+    msp.cpp
+    pid.cpp
     3rdparty/depthai-api/shared/logger/logs_writer.cpp
     3rdparty/depthai-api/host/core/3rdparty/loguru/loguru.cpp
     3rdparty/depthai-api/shared/general/data_writer.cpp
