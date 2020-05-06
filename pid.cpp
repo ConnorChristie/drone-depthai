@@ -50,9 +50,6 @@ void PID::clear()
 {
     output = 0;
     setpoint = 0;
-    _Kp = 0;
-    _Kd = 0;
-    _Ki = 0;
     _pre_error = 0;
     _integral = 0;
 }

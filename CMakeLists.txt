@@ -34,6 +34,8 @@ add_executable( ${APP_NAME}
     depthai_core.cpp
     msp.cpp
     pid.cpp
+    web_server.cpp
+    drone.cpp
     3rdparty/depthai-api/shared/logger/logs_writer.cpp
     3rdparty/depthai-api/host/core/3rdparty/loguru/loguru.cpp
     3rdparty/depthai-api/shared/general/data_writer.cpp
@@ -50,6 +52,7 @@ add_executable( ${APP_NAME}
     3rdparty/depthai-api/host/core/host_capture_command.cpp
     3rdparty/depthai-api/host/core/device_support_listener.cpp
     3rdparty/depthai-api/host/core/disparity_stream_post_processor.cpp
+    3rdparty/ceSerial/ceSerial.cpp
     ${XLINK_SOURCES}
 )
 
@@ -82,9 +85,8 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/depthai-api/shared/3rdpart
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/websocketpp/)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/websocketpp/ ${CMAKE_CURRENT_BINARY_DIR}/websocketpp)
 
-
 include_directories(3rdparty/ceSerial/)
-add_subdirectory(3rdparty/ceSerial)
+
 
 set(Boost_USE_STATIC_LIBS ON)
 set(Boost_USE_STATIC_RUNTIME ON)
@@ -98,7 +100,6 @@ target_link_libraries(
     -lusb-1.0
     -lpthread
     -ldl
-    ceSerial
     nlohmann_json::nlohmann_json
     nlohmann_json_schema_validator
     ${OpenCV_LIBRARIES}
