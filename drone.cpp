@@ -4,6 +4,10 @@ PID pid_x(-100, 100, 0.1, 0.01, 0.5);
 PID pid_y(-100, 100, 0.1, 0.01, 0.5);
 PID pid_z(-100, 100, 0.1, 0.01, 0.5);
 
+std::atomic<bool> is_tracking;
+std::experimental::optional<high_resolution_clock::time_point> started_tracking;
+std::experimental::optional<high_resolution_clock::time_point> lost_tracking;
+
 // Logarithmic curve coefs
 // Gets to 350 at t = 1.9s
 const double ACCEL_FACTOR    = 210;
@@ -107,7 +111,7 @@ void run_drone()
             o["motors"] = *motor;
             o["pids"]["z"] = std::map<std::string, double>{ {"set_point", pid_z.setpoint}, {"curr_value", pid_z.output} };
 
-            broadcast_ws(o.dump());
+            queue_ws_broadcast(o.dump());
 
             delete[] rc;
             delete[] motor;
@@ -144,14 +148,11 @@ void run_detection()
 
     std::vector<Detection> detections;
 
-    bool is_tracking;
-    std::experimental::optional<high_resolution_clock::time_point> started_tracking;
-    std::experimental::optional<high_resolution_clock::time_point> lost_tracking;
-
     while (is_running)
     {
         auto now = high_resolution_clock::now();
         auto dt = duration_cast<milliseconds>(now - t0).count();
+        auto dt_ms = dt / 1000.0;
         t0 = now;
 
         auto nets_and_data = pipeline->getAvailableNNetAndDataPackets();
@@ -192,14 +193,17 @@ void run_detection()
             }
         }
 
+        int height;
+        int width;
+
         for (auto it = data_packets.begin(); it != data_packets.end(); ++it)
         {
             if ((*it)->stream_name == "previewout")
             {
                 auto data = (*it)->getData();
                 auto dims = (*it)->dimensions;
-                auto height = dims.at(1);
-                auto width = dims.at(2);
+                height = dims.at(1);
+                width = dims.at(2);
 
                 void* img_data_ptr = (void*) data;
                 int channel_size = height * width;
@@ -243,49 +247,45 @@ void run_detection()
             }
         }
 
-        std::sort(detections.begin(), detections.end(),
-            [](const Detection &a, const Detection &b) -> bool
-        {
-            return a.size > b.size;
-        });
+        bool has_detections = !detections.empty();
 
-        if (!detections.empty())
+        if (has_detections)
         {
-            if (!is_tracking)
+            std::sort(detections.begin(), detections.end(),
+                [](const Detection &a, const Detection &b) -> bool
             {
-                started_tracking = high_resolution_clock::now();
+                return a.size > b.size;
+            });
+        }
 
-                pid_x.clear();
-                pid_y.clear();
-                pid_z.clear();
-
-                pid_z.setpoint = 1.0;
-            }
-
+        // Just started tracking
+        if (!is_tracking && has_detections)
+        {
             is_tracking = true;
+            started_tracking = high_resolution_clock::now();
             lost_tracking = std::experimental::nullopt;
+
+            pid_x.reset(width / 2.0);
+            pid_y.reset(height / 2.0);
+            pid_z.reset(1.0); // meters
         }
-        else if (is_tracking)
+        // Lost tracking
+        else if (is_tracking && !has_detections)
         {
-            if (!lost_tracking)
-            {
-                lost_tracking = high_resolution_clock::now();
-            }
+            std::cout << "No objects detected, did we lose track of it?\n";
 
-            if (duration_cast<seconds>(high_resolution_clock::now() - (*lost_tracking)).count() >= 2)
-            {
-                is_tracking = false;
-                started_tracking = std::experimental::nullopt;
-
-                std::cout << "Lost tracking of object after 2 seconds.\n";
-            }
+            is_tracking = false;
+            started_tracking = std::experimental::nullopt;
+            lost_tracking = high_resolution_clock::now();
         }
 
-        if (is_tracking && !detections.empty())
+        if (is_tracking)
         {
             auto best_detection = detections[0];
 
-            pid_z.update(dt / 1000.0, best_detection.distance_z);
+            pid_x.update(dt_ms, best_detection.center_x);
+            pid_y.update(dt_ms, best_detection.center_y);
+            pid_z.update(dt_ms, best_detection.distance_z);
         }
 
         const int key = cv::waitKey(1);

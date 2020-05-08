@@ -15,7 +15,7 @@ public:
     PID(double min, double max, double Kp, double Kd, double Ki);
 
     void update(double dt, double feedback_value);
-    void clear();
+    void reset(double setpoint);
 
     std::atomic<double> output;
     std::atomic<double> setpoint;

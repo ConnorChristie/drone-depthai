@@ -6,6 +6,7 @@
 #include <vector>
 #include <chrono>
 #include <thread>
+#include <atomic>
 #include <experimental/optional>
 
 #include <opencv2/opencv.hpp>

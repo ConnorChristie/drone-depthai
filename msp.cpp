@@ -3,20 +3,19 @@
 namespace Msp
 {
 
-char* concat_arrays(char* array1, size_t size1, char* array2, size_t size2)
+inline void concat_arrays(char* result, size_t size1, char* array2, size_t size2)
 {
-    char* result = (char*)malloc(size1 + size2);
-    std::copy(array1, array1 + size1, result);
-    std::copy(array2, array2 + size2, result + size1);
-
-    return result;
+    for (auto i = size1; i < size1 + size2; i++)
+    {
+        result[i] = array2[i - size1];
+    }
 }
 
 uint8_t calc_checksum(MspCommand command, char* params, size_t param_size)
 {
     uint8_t crc = param_size ^ command;
 
-    for (unsigned int i = 0; i < param_size; i++)
+    for (auto i = 0; i < param_size; i++)
     {
         crc ^= params[i];
     }
@@ -29,19 +28,18 @@ void print_bytes(char* data, size_t length)
     std::cout << "Raw data: ";
 
     // Print out raw bytes
-    for (unsigned int i = 0; i < length; i++)
+    for (auto i = 0; i < length; i++)
         printf("%02X ", (unsigned char)data[i]);
 
     printf("\n");
 }
 
-constexpr int CLEAR_AMOUNT = 128;
+#define CLEAR_AMOUNT 128
 
 void drain_read_buffer(ceSerial* serial)
 {
-    char* buf = new char[CLEAR_AMOUNT];
+    char buf[CLEAR_AMOUNT];
     auto drained_amount = serial->Read(buf, CLEAR_AMOUNT);
-    delete[] buf;
 
     std::cout << "Drained " << drained_amount << " bytes from read buffer." << std::endl;
 
@@ -64,39 +62,41 @@ char* send_raw_command(ceSerial* serial, MspCommand command, char* param_data, u
         .command = command,
     };
 
-    char* result = (char*)& request;
-    size_t result_size = sizeof(request);
+    size_t request_size = sizeof(MspRequest);
+    size_t crc_size = sizeof(uint8_t);
+
+    size_t data_size = request_size + send_param_size + crc_size;
+    char data[data_size];
+
+    concat_arrays(data, 0, (char*)& request, request_size);
 
     if (param_data != NULL)
     {
         // request + params
-        result = concat_arrays(
-            result, result_size,
+        concat_arrays(
+            data, request_size,
             param_data, send_param_size
         );
-        result_size += send_param_size;
     }
 
     uint8_t crc = calc_checksum(command, param_data, send_param_size);
 
     // + crc
-    size_t crc_size = sizeof(crc);
-    result = concat_arrays(
-        result, result_size,
+    concat_arrays(
+        data, request_size + send_param_size,
         (char*)& crc, crc_size
     );
-    result_size += crc_size;
 
     // Write to serial port
-    size_t write_length = serial->Write(result, result_size);
+    size_t write_length = serial->Write(data, data_size);
 
-    //slog::info << "Sending: " << slog::endl;
-    //print_bytes(result, result_size);
+    // std::cout << "Sending: " << std::endl;
+    // print_bytes(data, data_size);
 
-    if (write_length != result_size)
+    if (write_length != data_size)
     {
-        std::cout << "Error writing " << (int)result_size << " only wrote " << (int)write_length << std::endl;
-        print_bytes(result, result_size);
+        std::cout << "Error writing " << (int)data_size << " only wrote " << (int)write_length << std::endl;
+        print_bytes(data, data_size);
         return NULL;
     }
 
@@ -105,7 +105,7 @@ char* send_raw_command(ceSerial* serial, MspCommand command, char* param_data, u
     // Size of request + params + checksum
     // If we are sending data, only an ack will be sent back (no data)
     size_t rcv_param_size = param_data == NULL ? param_size : 0;
-    size_t rcv_size = sizeof(MspRequest) + rcv_param_size + sizeof(uint8_t);
+    size_t rcv_size = request_size + rcv_param_size + crc_size;
 
     char* rcv_data = new char[rcv_size];
     size_t read_length = serial->Read(rcv_data, rcv_size);
@@ -121,22 +121,21 @@ char* send_raw_command(ceSerial* serial, MspCommand command, char* param_data, u
     // Return params
     // $M> <size> <command> | <params> <checksum>
 
-    MspRequest rcv_request;
-    memcpy(&rcv_request, rcv_data, sizeof(MspRequest));
+    MspRequest* rcv_request = reinterpret_cast<MspRequest*>(rcv_data);
 
     //slog::info << "Rcving: " << slog::endl;
     //print_bytes(rcv_data, rcv_size);
 
     if (read_length != rcv_size)
     {
-        std::cout << "Error reading " << (int)rcv_size << " only read " << (int)read_length << " (response told us to read " << (int)rcv_request.size << " bytes)" << std::endl;
+        std::cout << "Error reading " << (int)rcv_size << " only read " << (int)read_length << " (response told us to read " << (int)rcv_request->size << " bytes)" << std::endl;
         print_bytes(rcv_data, rcv_size);
         drain_read_buffer(serial);
         return NULL;
     }
 
     // Verify direction is correct and command matches the one we requested
-    if (rcv_request.direction != '>' || rcv_request.command != command)
+    if (rcv_request->direction != '>' || rcv_request->command != command)
     {
         std::cout << "Was expecting a response to our request but received different" << std::endl;
         print_bytes(rcv_data, rcv_size);
@@ -144,21 +143,19 @@ char* send_raw_command(ceSerial* serial, MspCommand command, char* param_data, u
         return NULL;
     }
 
-    if (rcv_request.size != rcv_param_size)
+    if (rcv_request->size != rcv_param_size)
     {
-        std::cout << "Was expecting a response size of " << (int)rcv_param_size << " but received " << (int)rcv_request.size << " instead" << std::endl;
+        std::cout << "Was expecting a response size of " << (int)rcv_param_size << " but received " << (int)rcv_request->size << " instead" << std::endl;
         print_bytes(rcv_data, rcv_size);
         drain_read_buffer(serial);
         return NULL;
     }
 
     char* rcv_params = new char[rcv_param_size];
-    memcpy(rcv_params, rcv_data + sizeof(MspRequest), rcv_param_size);
+    memcpy(rcv_params, rcv_data + request_size, rcv_param_size);
 
-    uint8_t calc_crc = calc_checksum(rcv_request.command, (char*)rcv_params, rcv_request.size);
-    uint8_t actual_crc;
-
-    memcpy(&actual_crc, rcv_data + sizeof(MspRequest) + rcv_param_size, sizeof(actual_crc));
+    uint8_t calc_crc = calc_checksum(rcv_request->command, (char*)rcv_params, rcv_request->size);
+    uint8_t actual_crc = (uint8_t) rcv_data[request_size + rcv_param_size];
 
     // Verify the checksum is correct
     if (calc_crc != actual_crc)
@@ -167,7 +164,6 @@ char* send_raw_command(ceSerial* serial, MspCommand command, char* param_data, u
         return NULL;
     }
 
-    free(result);
     delete[] rcv_data;
 
     return rcv_params;

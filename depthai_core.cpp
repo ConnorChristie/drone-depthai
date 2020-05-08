@@ -140,6 +140,13 @@ std::unique_ptr<DisparityStreamPostProcessor> g_disparity_post_proc;
 std::unique_ptr<DeviceSupportListener>        g_device_support_listener;
 std::unique_ptr<HostCaptureCommand>           g_host_caputure_command;
 
+std::map<std::string, int> nn_to_depth_mapping = {
+    { "off_x", 0 },
+    { "off_y", 0 },
+    { "max_w", 0 },
+    { "max_h", 0 },
+};
+
 bool init_device(
     const std::string &device_cmd_file,
     const std::string &usb_device
@@ -254,6 +261,9 @@ bool init_device(
             }
         }
 
+
+
+
         result = true;
     } while (false);
 
@@ -348,6 +358,7 @@ std::shared_ptr<CNNHostPipeline> create_pipeline(
             std::cout << "There is no cnn configuration file or error in it\'s parsing: " << config.ai.blob_file_config.c_str() << "\n";
         }
 
+
         // pipeline configurations json
         // homography
         std::vector<float> homography_buff = {
@@ -400,6 +411,7 @@ std::shared_ptr<CNNHostPipeline> create_pipeline(
             {"_homography_right_to_left", homography_buff}
         };
         json_config_obj["depth"]["padding_factor"] = config.depth.padding_factor;
+        json_config_obj["depth"]["depth_limit_mm"] = (int)(config.depth.depth_limit_m * 1000);
 
         json_config_obj["_load_inBlob"] = true;
         json_config_obj["_pipeline"] =
@@ -408,6 +420,7 @@ std::shared_ptr<CNNHostPipeline> create_pipeline(
         };
 
         json_config_obj["ai"]["calc_dist_to_bb"] = config.ai.calc_dist_to_bb;
+        json_config_obj["ai"]["keep_aspect_ratio"] = config.ai.keep_aspect_ratio;
 
         bool add_disparity_post_processing_color = false;
         bool temp_measurement = false;
@@ -453,6 +466,7 @@ std::shared_ptr<CNNHostPipeline> create_pipeline(
                 pipeline_device_streams.push_back(stream.name);
             }
         }
+
 
         // host -> "config_h2d" -> device
         std::string pipeline_config_str_packed = json_config_obj.dump();
@@ -527,6 +541,15 @@ std::shared_ptr<CNNHostPipeline> create_pipeline(
             printf("CNN input width: %d\n", cnn_input_info.cnn_input_width);
             printf("CNN input height: %d\n", cnn_input_info.cnn_input_height);
             printf("CNN input num channels: %d\n", cnn_input_info.cnn_input_num_channels);
+            printf("CNN to depth bounding-box mapping: start(%d, %d), max_size(%d, %d)\n",
+                    cnn_input_info.nn_to_depth.offset_x,
+                    cnn_input_info.nn_to_depth.offset_y,
+                    cnn_input_info.nn_to_depth.max_width,
+                    cnn_input_info.nn_to_depth.max_height);
+            nn_to_depth_mapping["off_x"] = cnn_input_info.nn_to_depth.offset_x;
+            nn_to_depth_mapping["off_y"] = cnn_input_info.nn_to_depth.offset_y;
+            nn_to_depth_mapping["max_w"] = cnn_input_info.nn_to_depth.max_width;
+            nn_to_depth_mapping["max_h"] = cnn_input_info.nn_to_depth.max_height;
 
             // update tensor infos
             assert(!(tensors_info.size() > (sizeof(cnn_input_info.offsets)/sizeof(cnn_input_info.offsets[0]))));
@@ -561,6 +584,7 @@ std::shared_ptr<CNNHostPipeline> create_pipeline(
                 break;
             }
         }
+
 
         // sort streams by device specified order
         {
@@ -598,6 +622,7 @@ std::shared_ptr<CNNHostPipeline> create_pipeline(
             );
         }
 
+
         // pipeline
         if(gl_result == nullptr)
             gl_result = std::shared_ptr<CNNHostPipeline>(new CNNHostPipeline(tensors_info));
@@ -618,6 +643,7 @@ std::shared_ptr<CNNHostPipeline> create_pipeline(
                 break;
             }
         }
+
 
         // disparity post processor
         if (add_disparity_post_processing_color)

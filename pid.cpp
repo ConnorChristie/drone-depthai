@@ -46,10 +46,10 @@ void PID::update(double dt, double feedback_value)
     output = _output;
 }
 
-void PID::clear()
+void PID::reset(double setpoint)
 {
-    output = 0;
-    setpoint = 0;
-    _pre_error = 0;
-    _integral = 0;
+    this->output = 0;
+    this->setpoint = setpoint;
+    this->_pre_error = 0;
+    this->_integral = 0;
 }

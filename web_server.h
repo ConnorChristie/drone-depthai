@@ -17,4 +17,4 @@ extern volatile sig_atomic_t is_running;
 void run_ws();
 void stop_ws();
 void run_ws_sender();
-void broadcast_ws(std::string msg);
+void queue_ws_broadcast(std::string msg);

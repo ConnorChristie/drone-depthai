@@ -88,7 +88,7 @@ void run_ws_sender()
     }
 }
 
-void broadcast_ws(std::string msg)
+void queue_ws_broadcast(std::string msg)
 {
     {
         std::lock_guard<std::mutex> guard(ws_action_lock);
