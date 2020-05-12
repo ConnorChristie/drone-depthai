@@ -14,7 +14,7 @@ add_definitions(-DUSE_USB_VSC) # for XLink communication
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_FLAGS "-std=c++17 ${CMAKE_CXX_FLAGS}")
+set(CMAKE_CXX_FLAGS "-O3 -std=c++17 ${CMAKE_CXX_FLAGS}")
 
 
 find_package(OpenCV REQUIRED )

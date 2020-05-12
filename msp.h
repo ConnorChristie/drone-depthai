@@ -13,50 +13,6 @@ using namespace std;
 using namespace std::chrono;
 using nlohmann::json;
 
-namespace Drone
-{
-
-enum DroneFlightMode : uint32_t
-{
-    PENDING_INIT  = (1 << 0),
-    RECOVERY_MODE = (1 << 1),
-    FLY_UP_MODE   = (1 << 2),
-    HOVER_MODE    = (1 << 3),
-    FOLLOW_MODE   = (1 << 4)
-};
-
-constexpr uint16_t LOOP_SLEEP_TIME = 2;
-constexpr uint16_t HOVER_TIMEOUT   = 10000;
-
-constexpr uint16_t MIDDLE_VALUE  = 1500;
-constexpr uint16_t DISABLE_VALUE = MIDDLE_VALUE - 512;
-constexpr uint16_t ENABLE_VALUE  = MIDDLE_VALUE + 512;
-
-struct DroneReceiver
-{
-    uint16_t roll;
-    uint16_t pitch;
-    uint16_t throttle;
-    uint16_t yaw;
-
-    uint16_t flight_mode;
-    uint16_t aux_2;
-    uint16_t arm_mode;
-    uint16_t aux_4;
-    uint16_t aux_5;
-    uint16_t aux_6;
-    uint16_t aux_7;
-    uint16_t aux_8;
-    uint16_t aux_9;
-    uint16_t aux_10;
-    uint16_t aux_11;
-    uint16_t aux_12;
-    uint16_t aux_13;
-    uint16_t aux_14;
-};
-
-};
-
 namespace Msp
 {
 

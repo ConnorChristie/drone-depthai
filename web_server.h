@@ -5,8 +5,7 @@
 #include <vector>
 #include <mutex>
 #include <condition_variable>
-
-#include <nlohmann/json.hpp>
+#include <chrono>
 
 #include <websocketpp/config/asio_no_tls.hpp>
 #include <websocketpp/server.hpp>
@@ -18,3 +17,4 @@ void run_ws();
 void stop_ws();
 void run_ws_sender();
 void queue_ws_broadcast(std::string msg);
+std::vector<std::string> ws_get_messages();

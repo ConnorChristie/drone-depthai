@@ -3,13 +3,16 @@
 typedef websocketpp::connection_hdl connection_hdl;
 typedef websocketpp::server<websocketpp::config::asio> server;
 typedef std::set<connection_hdl, std::owner_less<connection_hdl>> con_list;
+typedef server::message_ptr message_ptr;
 
 server ws_server;
 con_list ws_connections;
 
-std::queue<std::string> ws_queue;
+std::queue<std::string> ws_send_queue;
+std::queue<std::string> ws_recv_queue;
 
-std::mutex ws_action_lock;
+std::mutex ws_send_lock;
+std::timed_mutex ws_recv_lock;
 std::mutex ws_connection_lock;
 std::condition_variable ws_action_cond;
 
@@ -25,6 +28,12 @@ void on_close(connection_hdl hdl)
     ws_connections.erase(hdl);
 }
 
+void on_message(connection_hdl hdl, message_ptr msg)
+{
+    std::lock_guard<std::timed_mutex> guard(ws_recv_lock);
+    ws_recv_queue.push(msg->get_payload());
+}
+
 void run_ws()
 {
     ws_server.clear_access_channels(websocketpp::log::alevel::all);
@@ -36,6 +45,7 @@ void run_ws()
 
     ws_server.set_open_handler(&on_open);
     ws_server.set_close_handler(&on_close);
+    ws_server.set_message_handler(&on_message);
 
     ws_server.listen(8080);
     ws_server.start_accept();
@@ -67,13 +77,13 @@ void run_ws_sender()
 {
     while (is_running)
     {
-        std::unique_lock<std::mutex> lock(ws_action_lock);
+        std::unique_lock<std::mutex> lock(ws_send_lock);
         ws_action_cond.wait(lock);
 
         if (!is_running) break;
 
-        auto msg = ws_queue.front();
-        ws_queue.pop();
+        auto msg = ws_send_queue.front();
+        ws_send_queue.pop();
 
         {
             std::lock_guard<std::mutex> guard(ws_connection_lock);
@@ -91,9 +101,27 @@ void run_ws_sender()
 void queue_ws_broadcast(std::string msg)
 {
     {
-        std::lock_guard<std::mutex> guard(ws_action_lock);
-        ws_queue.push(msg);
+        std::lock_guard<std::mutex> guard(ws_send_lock);
+        ws_send_queue.push(msg);
     }
 
     ws_action_cond.notify_one();
+}
+
+std::chrono::milliseconds one_ms(1);
+
+std::vector<std::string> ws_get_messages()
+{
+    std::vector<std::string> ret;
+    std::unique_lock<std::timed_mutex> lock(ws_recv_lock, one_ms);
+
+    while (!ws_recv_queue.empty())
+    {
+        ret.push_back(ws_recv_queue.front());
+        ws_recv_queue.pop();
+    }
+
+    lock.unlock();
+
+    return ret;
 }
