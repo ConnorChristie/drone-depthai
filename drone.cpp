@@ -38,18 +38,13 @@ void init_drone()
     );
 }
 
-// Logarithmic curve coefs
-// Gets to 350 at t = 1.9s
-const double ACCEL_FACTOR    = 210;
-const double DIVISION_FACTOR = 30;
-const double Y_OFFSET        = -30;
+const double ACCEL_FACTOR    = 320;
+const double DIVISION_FACTOR = 60;
 
-// Determine the x offset by solving for x-intercept
-const double X_OFFSET = pow(10, -Y_OFFSET / ACCEL_FACTOR) * DIVISION_FACTOR;
-
+// https://www.desmos.com/calculator/u0sumemvto
 inline double curve_fn(double x)
 {
-    return ACCEL_FACTOR * log10((x + X_OFFSET) / DIVISION_FACTOR) + Y_OFFSET;
+    return ACCEL_FACTOR * log10((x + DIVISION_FACTOR) / DIVISION_FACTOR);
 }
 
 void set_receiver_values(ceSerial *serial, bool armed, int throttle, int pitch, int roll)
@@ -68,6 +63,7 @@ void set_receiver_values(ceSerial *serial, bool armed, int throttle, int pitch, 
     Msp::send_command<Drone::DroneReceiver>(serial, Msp::MspCommand::SET_RAW_RC, &params);
 }
 
+bool web_armed = false;
 auto flight_mode = Drone::DroneFlightMode::RECOVERY_MODE;
 auto task_start = high_resolution_clock::now();
 
@@ -96,6 +92,8 @@ void run_drone()
 
     bool armed = false;
     int throttle = 0;
+
+    Drone::DroneReceiver remote_controls;
 
     while (is_running)
     {
@@ -130,6 +128,19 @@ void run_drone()
                     pid_y->reset(json_obj["pid_config"]["y"].get<PIDConfig>());
                     pid_z->reset(json_obj["pid_config"]["z"].get<PIDConfig>());
                 }
+                else if (command == "setArmed")
+                {
+                    web_armed = json_obj["armed"].get<bool>();
+                }
+                else if (command == "setChannels")
+                {
+                    json_obj["channels"].get_to(remote_controls);
+
+                    std::cout << "A: " << remote_controls.roll << "\n";
+                    std::cout << "B: " << remote_controls.pitch << "\n";
+                    std::cout << "C: " << remote_controls.throttle << "\n";
+                    std::cout << "D: " << remote_controls.yaw << "\n";
+                }
             }
         }
 
@@ -140,6 +151,15 @@ void run_drone()
 
         if (status == NULL)
         {
+            continue;
+        }
+
+        if (!web_armed)
+        {
+            flight_mode = Drone::DroneFlightMode::RECOVERY_MODE;
+
+            set_receiver_values(serial, web_armed, 0, 0, 0);
+
             continue;
         }
 
@@ -461,3 +481,55 @@ void to_json(json& j, const Detection& d)
         {"size", d.size},
     };
 }
+
+namespace Drone
+{
+
+void to_json(json& j, const DroneReceiver& d)
+{
+    j = json
+    {
+        {"roll", d.roll},
+        {"pitch", d.pitch},
+        {"throttle", d.throttle},
+        {"yaw", d.yaw},
+        {"flight_mode", d.flight_mode},
+        {"aux_2", d.aux_2},
+        {"arm_mode", d.arm_mode},
+        {"aux_4", d.aux_4},
+        {"aux_5", d.aux_5},
+        {"aux_6", d.aux_6},
+        {"aux_7", d.aux_7},
+        {"aux_8", d.aux_8},
+        {"aux_9", d.aux_9},
+        {"aux_10", d.aux_10},
+        {"aux_11", d.aux_11},
+        {"aux_12", d.aux_12},
+        {"aux_13", d.aux_13},
+        {"aux_14", d.aux_14},
+    };
+}
+
+void from_json(const json& j, DroneReceiver& d)
+{
+    j.at("roll").get_to(d.roll);
+    j.at("pitch").get_to(d.pitch);
+    j.at("throttle").get_to(d.throttle);
+    j.at("yaw").get_to(d.yaw);
+    j.at("flight_mode").get_to(d.flight_mode);
+    j.at("aux_2").get_to(d.aux_2);
+    j.at("arm_mode").get_to(d.arm_mode);
+    j.at("aux_4").get_to(d.aux_4);
+    j.at("aux_5").get_to(d.aux_5);
+    j.at("aux_6").get_to(d.aux_6);
+    j.at("aux_7").get_to(d.aux_7);
+    j.at("aux_8").get_to(d.aux_8);
+    j.at("aux_9").get_to(d.aux_9);
+    j.at("aux_10").get_to(d.aux_10);
+    j.at("aux_11").get_to(d.aux_11);
+    j.at("aux_12").get_to(d.aux_12);
+    j.at("aux_13").get_to(d.aux_13);
+    j.at("aux_14").get_to(d.aux_14);
+}
+
+};

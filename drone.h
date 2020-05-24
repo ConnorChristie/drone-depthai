@@ -68,6 +68,8 @@ struct DroneReceiver
     uint16_t aux_13;
     uint16_t aux_14;
 };
+void to_json(json& j, const DroneReceiver& d);
+void from_json(const json& j, DroneReceiver& d);
 
 };
 
