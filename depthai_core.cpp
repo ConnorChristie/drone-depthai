@@ -38,16 +38,25 @@ std::shared_ptr<CNNHostPipeline> gl_result = nullptr;
 
 static volatile std::atomic<int> wdog_keep;
 
-static int wdog_thread_alive = 1;
+bool soft_deinit_device();
+bool init_device(
+    const std::string &device_cmd_file,
+    const std::string &usb_device
+);
+std::shared_ptr<CNNHostPipeline> create_pipeline(
+    const std::string &config_json_str
+);
+
+static int wdog_thread_alive = 0;
 void wdog_thread(int& wd_timeout_ms)
 {
     std::cout << "watchdog started " << wd_timeout_ms << std::endl;
     const int sleep_chunk = 100;
     const int sleep_nr = wd_timeout_ms / sleep_chunk;
-    while (wdog_thread_alive)
+    while(wdog_thread_alive)
     {
         wdog_keep = 0;
-        for (int i = 0; i < sleep_nr; i++)
+        for(int i = 0; i < sleep_nr; i++)
         {
             std::this_thread::sleep_for(std::chrono::milliseconds(sleep_chunk));
             if(wdog_thread_alive == 0)
@@ -55,18 +64,18 @@ void wdog_thread(int& wd_timeout_ms)
                 break;
             }
         }
-        if (wdog_keep == 0 && wdog_thread_alive == 1)
+        if(wdog_keep == 0 && wdog_thread_alive == 1)
         {
             std::cout << "watchdog triggered " << std::endl;
             soft_deinit_device();
             bool init;
-            for (int retry = 0; retry < 1; retry++)
+            for(int retry = 0; retry < 1; retry++)
             {
                 init = init_device(cmd_backup, usb_device_backup);
-                if (init)
+                if(init)
                 {
                     break;
-                }
+            }
             }
             if(!init)
             {
@@ -75,11 +84,12 @@ void wdog_thread(int& wd_timeout_ms)
             create_pipeline(config_backup);
         }
     }
+
 }
 
 static std::thread wd_thread;
 static int wd_timeout_ms = 3000;
-int wdog_start(void)
+int  wdog_start(void)
 {
     static int once = 1;
     if(once)
@@ -90,7 +100,7 @@ int wdog_start(void)
     }
     return 0;
 }
-int wdog_stop(void)
+int  wdog_stop(void)
 {
     if(wdog_thread_alive)
     {
@@ -106,6 +116,7 @@ void wdog_keepalive(void)
 {
     wdog_keep = 1;
 }
+
 };
 
 // TODO: REMOVE, IT'S TEMPORARY (for test only)
@@ -146,6 +157,7 @@ std::map<std::string, int> nn_to_depth_mapping = {
     { "max_w", 0 },
     { "max_h", 0 },
 };
+
 
 bool init_device(
     const std::string &device_cmd_file,
@@ -315,6 +327,17 @@ std::vector<std::string> get_available_steams()
     return result;
 }
 
+void request_jpeg(){
+    if(g_host_caputure_command != nullptr){
+        g_host_caputure_command->capture();
+    }
+}
+
+std::map<std::string, int> get_nn_to_depth_bbox_mapping()
+{
+    return nn_to_depth_mapping;
+}
+
 std::shared_ptr<CNNHostPipeline> create_pipeline(
     const std::string &config_json_str
 )
@@ -395,6 +418,12 @@ std::shared_ptr<CNNHostPipeline> create_pipeline(
         }
 
         json json_config_obj;
+
+        // Add video configuration if specified
+        if(config_json.count("video_config") > 0){
+            json_config_obj["video_config"] = config_json["video_config"]; 
+        }
+
         json_config_obj["board"]["clear-eeprom"] = config.board_config.clear_eeprom;
         json_config_obj["board"]["store-to-eeprom"] = config.board_config.store_to_eeprom;
         json_config_obj["board"]["override-eeprom"] = config.board_config.override_eeprom;
@@ -412,6 +441,7 @@ std::shared_ptr<CNNHostPipeline> create_pipeline(
         };
         json_config_obj["depth"]["padding_factor"] = config.depth.padding_factor;
         json_config_obj["depth"]["depth_limit_mm"] = (int)(config.depth.depth_limit_m * 1000);
+        json_config_obj["depth"]["confidence_threshold"] = config.depth.confidence_threshold;
 
         json_config_obj["_load_inBlob"] = true;
         json_config_obj["_pipeline"] =
