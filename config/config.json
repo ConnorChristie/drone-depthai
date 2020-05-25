@@ -1,0 +1,24 @@
+{
+    "streams": ["metaout"],
+    "depth":
+    {
+        "calibration_file": "/home/pi/depthai/resources/depthai.calib",
+        "padding_factor": 0.3
+    },
+    "ai":
+    {
+        "blob_file": "/home/pi/drone-depthai/networks/person-2/face-detection-adas-0001.blob",
+        "blob_file_config": "/home/pi/drone-depthai/networks/person-2/face-detection-adas-0001_depth.json",
+        "calc_dist_to_bb": true
+    },
+    "board_config":
+    {
+        "name": "BW1098OBC",
+        "revision": "R0M0E0",
+        "swap_left_and_right_cameras": true,
+        "left_fov_deg": 71.86,
+        "rgb_fov_deg": 68.7938,
+        "left_to_right_distance_cm": 7.5,
+        "left_to_rgb_distance_cm": 3.75
+    }
+}
