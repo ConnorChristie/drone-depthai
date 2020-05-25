@@ -21,9 +21,9 @@ int main(int argc, char** argv)
 
     init_drone();
 
-    std::thread thread_ws(&run_ws);
-    std::thread thread_ws_sender(&run_ws_sender);
-    std::thread thread_drone(&run_drone);
+    // std::thread thread_ws(&run_ws);
+    // std::thread thread_ws_sender(&run_ws_sender);
+    // std::thread thread_drone(&run_drone);
 
     try
     {
@@ -36,9 +36,9 @@ int main(int argc, char** argv)
     }
 
     deinit_device();
-    stop_ws();
+    // stop_ws();
 
-    thread_ws.join();
-    thread_ws_sender.join();
-    thread_drone.join();
+    // thread_ws.join();
+    // thread_ws_sender.join();
+    // thread_drone.join();
 }

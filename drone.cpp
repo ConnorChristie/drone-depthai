@@ -2,6 +2,9 @@
 
 #define SHOW_PREVIEW false
 
+int nn_img_width = -1;
+int nn_img_height = -1;
+
 PID* pid_x;
 PID* pid_y;
 PID* pid_z;
@@ -18,6 +21,9 @@ void init_drone()
         std::cout << "error: getJSONFromFile (drone.json)\n";
         return;
     }
+
+    nn_img_width = drone_config["width"].get<int>();
+    nn_img_height = drone_config["height"].get<int>();
 
     pid_x = new PID(
         -350,
@@ -311,7 +317,7 @@ void run_detection()
         return;
     }
 
-    bool did_init = init_device("/home/pi/depthai/depthai.cmd", "");
+    bool did_init = init_device("/home/pi/depthai/depthai_usb2.cmd", "");
 
     if (!did_init)
     {
@@ -322,9 +328,6 @@ void run_detection()
     auto t0 = high_resolution_clock::now();
 
     std::vector<Detection> detections;
-
-    int height = -1;
-    int width = -1;
 
     while (is_running)
     {
@@ -342,7 +345,7 @@ void run_detection()
             detections.clear();
         }
 
-        if (width != -1 && height != -1)
+        if (nn_img_width != -1 && nn_img_height != -1)
         {
             for (auto it = nnet_packets.begin(); it != nnet_packets.end(); ++it)
             {
@@ -352,10 +355,10 @@ void run_detection()
                 {
                     auto e = entries->getByIndex(i);
 
-                    auto left = e[0].getFloat("left") * width;
-                    auto top = e[0].getFloat("top") * height;
-                    auto right = e[0].getFloat("right") * width;
-                    auto bottom = e[0].getFloat("bottom") * height;
+                    auto left = e[0].getFloat("left") * nn_img_width;
+                    auto top = e[0].getFloat("top") * nn_img_height;
+                    auto right = e[0].getFloat("right") * nn_img_width;
+                    auto bottom = e[0].getFloat("bottom") * nn_img_height;
 
                     auto center_x = (left + right) / 2.0f;
                     auto center_y = (top + bottom) / 2.0f;
@@ -388,17 +391,17 @@ void run_detection()
             {
                 auto data = (*it)->getData();
                 auto dims = (*it)->dimensions;
-                height = dims.at(1);
-                width = dims.at(2);
+                nn_img_height = dims.at(1);
+                nn_img_width = dims.at(2);
 
                 if (SHOW_PREVIEW)
                 {
                     void* img_data_ptr = (void*) data;
-                    int channel_size = height * width;
+                    int channel_size = nn_img_height * nn_img_width;
 
-                    cv::Mat R(height, width, CV_8UC1, img_data_ptr);
-                    cv::Mat G(height, width, CV_8UC1, img_data_ptr + channel_size);
-                    cv::Mat B(height, width, CV_8UC1, img_data_ptr + channel_size * 2);
+                    cv::Mat R(nn_img_height, nn_img_width, CV_8UC1, img_data_ptr);
+                    cv::Mat G(nn_img_height, nn_img_width, CV_8UC1, img_data_ptr + channel_size);
+                    cv::Mat B(nn_img_height, nn_img_width, CV_8UC1, img_data_ptr + channel_size * 2);
 
                     std::vector<cv::Mat> channels;
                     channels.push_back(R);
@@ -456,12 +459,14 @@ void run_detection()
         {
             auto best_detection = &detections[0];
 
-            pid_x->update(best_detection->center_x - (width / 2.0));
-            pid_y->update(best_detection->center_y - (height / 2.0));
+            std::cout << "Center: " << best_detection->distance_z << "\n";
+
+            pid_x->update(best_detection->center_x - (nn_img_width / 2.0));
+            pid_y->update(best_detection->center_y - (nn_img_height / 2.0));
             pid_z->update(best_detection->distance_z * 100);
         }
 
-        const int key = cv::waitKey(1);
+        // const int key = cv::waitKey(1);
     }
 }
 
