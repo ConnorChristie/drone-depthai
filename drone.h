@@ -36,7 +36,6 @@ enum DroneFlightMode
     HOVER_MODE = 3,
     FOLLOW_MODE = 4,
     FLY_UP_AND_DETECTED = 5,
-    THROTTLE_DOWN = 6,
 };
 
 constexpr uint16_t LOOP_SLEEP_TIME = 2;
@@ -74,6 +73,7 @@ void from_json(const json& j, DroneReceiver& d);
 };
 
 void init_drone();
+void deinit_drone();
 void run_drone();
 void run_detection();
 

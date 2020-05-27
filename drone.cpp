@@ -2,6 +2,8 @@
 
 #define SHOW_PREVIEW false
 
+ceSerial* serial;
+
 int nn_img_width = -1;
 int nn_img_height = -1;
 
@@ -13,12 +15,26 @@ std::atomic<bool> is_tracking;
 std::experimental::optional<high_resolution_clock::time_point> started_tracking;
 std::experimental::optional<high_resolution_clock::time_point> lost_tracking;
 
+auto t0 = high_resolution_clock::now();
+auto telem_start = high_resolution_clock::now();
+
 void init_drone()
 {
     json drone_config;
     if (!getJSONFromFile("drone.json", drone_config))
     {
         std::cout << "error: getJSONFromFile (drone.json)\n";
+        return;
+    }
+
+    auto msp_port = drone_config["msp_port"].get<std::string>();
+    std::cout << "MSP port: " << msp_port << "\n";
+    serial = new ceSerial(msp_port, 115200, 8, 'N', 1);
+
+    if (serial->Open() != 0)
+    {
+        std::cout << "Unable to open serial connection on " << msp_port << "\n";
+        exit(1);
         return;
     }
 
@@ -44,6 +60,11 @@ void init_drone()
     );
 }
 
+void deinit_drone()
+{
+    serial->Close();
+}
+
 const double ACCEL_FACTOR    = 320;
 const double DIVISION_FACTOR = 60;
 
@@ -59,7 +80,7 @@ void set_receiver_values(ceSerial *serial, bool armed, int throttle, int pitch, 
     {
         .roll        = (uint16_t)(Drone::MIDDLE_VALUE + roll),
         .pitch       = (uint16_t)(Drone::MIDDLE_VALUE + pitch),
-        .throttle    = (uint16_t)(Drone::DISABLE_VALUE + throttle),
+        .throttle    = (uint16_t)(throttle),
         .yaw         = Drone::MIDDLE_VALUE,
         .flight_mode = Drone::DISABLE_VALUE, // DISABLE = Horizon mode
         .aux_2       = Drone::MIDDLE_VALUE,
@@ -69,9 +90,12 @@ void set_receiver_values(ceSerial *serial, bool armed, int throttle, int pitch, 
     Msp::send_command<Drone::DroneReceiver>(serial, Msp::MspCommand::SET_RAW_RC, &params);
 }
 
-bool web_armed = false;
+bool armed = false;
+bool remote_armed = false;
 auto flight_mode = Drone::DroneFlightMode::RECOVERY_MODE;
 auto task_start = high_resolution_clock::now();
+
+int throttle = 0;
 
 void to_mode(Drone::DroneFlightMode mode)
 {
@@ -90,24 +114,35 @@ void to_mode(Drone::DroneFlightMode mode)
 
 void run_drone()
 {
-    ceSerial *serial = new ceSerial("/dev/ttySAC3", 115200, 8, 'N', 1);
-    serial->Open();
-
-    auto t0 = high_resolution_clock::now();
-    auto telem_start = high_resolution_clock::now();
-
-    bool armed = false;
-    int throttle = 0;
-
-    Drone::DroneReceiver remote_controls;
-
-    while (is_running)
-    {
+    // while (is_running)
+    // {
         auto now = high_resolution_clock::now();
         auto dt = duration_cast<milliseconds>(now - t0).count();
         t0 = now;
 
+        if (duration_cast<milliseconds>(high_resolution_clock::now() - telem_start).count() >= 200)
+        {
+            telem_start = high_resolution_clock::now();
+
+            auto rc = Msp::receive_parameters<Msp::MspReceiver>(serial, Msp::MspCommand::RC);
+            auto motor = Msp::receive_parameters<Msp::MspMotor>(serial, Msp::MspCommand::MOTOR);
+
+            json o;
+            o["receiver"] = *rc;
+            o["motors"] = *motor;
+            o["pids"]["x"] = std::map<std::string, double>{ {"set_point", pid_x->feedback_value}, {"curr_value", pid_x->output} };
+            o["pids"]["y"] = std::map<std::string, double>{ {"set_point", pid_y->feedback_value}, {"curr_value", pid_y->output} };
+            o["pids"]["z"] = std::map<std::string, double>{ {"set_point", pid_z->feedback_value}, {"curr_value", pid_z->output} };
+
+            queue_ws_broadcast(o.dump());
+
+            delete[] rc;
+            delete[] motor;
+        }
+
         // std::cout << "Drone Elapsed: " << dt << "\n";
+
+        std::experimental::optional<Drone::DroneReceiver> remote_controls;
 
         auto commands = ws_get_messages();
 
@@ -134,18 +169,10 @@ void run_drone()
                     pid_y->reset(json_obj["pid_config"]["y"].get<PIDConfig>());
                     pid_z->reset(json_obj["pid_config"]["z"].get<PIDConfig>());
                 }
-                else if (command == "setArmed")
-                {
-                    web_armed = json_obj["armed"].get<bool>();
-                }
                 else if (command == "setChannels")
                 {
-                    json_obj["channels"].get_to(remote_controls);
-
-                    std::cout << "A: " << remote_controls.roll << "\n";
-                    std::cout << "B: " << remote_controls.pitch << "\n";
-                    std::cout << "C: " << remote_controls.throttle << "\n";
-                    std::cout << "D: " << remote_controls.yaw << "\n";
+                    remote_controls = json_obj["channels"].get<Drone::DroneReceiver>();
+                    remote_armed = (*remote_controls).arm_mode > 1500;
                 }
             }
         }
@@ -157,16 +184,16 @@ void run_drone()
 
         if (status == NULL)
         {
-            continue;
+            goto cleanup;
         }
 
-        if (!web_armed)
+        if (!remote_armed)
         {
             flight_mode = Drone::DroneFlightMode::RECOVERY_MODE;
 
-            set_receiver_values(serial, web_armed, 0, 0, 0);
+            set_receiver_values(serial, remote_armed, Drone::DISABLE_VALUE, 0, 0);
 
-            continue;
+            goto cleanup;
         }
 
         if ((status->arming_flags & Msp::MspArmingDisableFlags::ARMING_DISABLED_RX_FAILSAFE) == Msp::MspArmingDisableFlags::ARMING_DISABLED_RX_FAILSAFE
@@ -182,7 +209,7 @@ void run_drone()
         if (flight_mode == Drone::DroneFlightMode::RECOVERY_MODE)
         {
             armed = false;
-            throttle = 0;
+            throttle = Drone::DISABLE_VALUE;
         }
         else if (flight_mode == Drone::DroneFlightMode::FLY_UP_MODE)
         {
@@ -192,21 +219,14 @@ void run_drone()
             {
                 to_mode(Drone::DroneFlightMode::FLY_UP_AND_DETECTED);
 
-                continue;
+                goto cleanup;
             }
             else
             {
-                auto task_elapsed = duration_cast<milliseconds>(high_resolution_clock::now() - task_start).count();
-
-                if (task_elapsed >= 5000)
+                if (remote_controls)
                 {
-                    to_mode(Drone::DroneFlightMode::THROTTLE_DOWN);
-
-                    continue;
-                }
-                else
-                {
-                    throttle = static_cast<int>(round(curve_fn(task_elapsed)));
+                    throttle = (*remote_controls).throttle;
+                    // throttle = static_cast<int>(round(curve_fn(task_elapsed)));
                 }
             }
         }
@@ -222,7 +242,7 @@ void run_drone()
                 {
                     to_mode(Drone::DroneFlightMode::FOLLOW_MODE);
 
-                    continue;
+                    goto cleanup;
                 }
             }
             else if (!is_tracking && lost_tracking)
@@ -233,20 +253,8 @@ void run_drone()
                 {
                     to_mode(Drone::DroneFlightMode::FLY_UP_MODE);
 
-                    continue;
+                    goto cleanup;
                 }
-            }
-        }
-        else if (flight_mode == Drone::DroneFlightMode::THROTTLE_DOWN)
-        {
-            armed = true;
-            throttle -= 10;
-
-            if (throttle <= 0)
-            {
-                to_mode(Drone::DroneFlightMode::RECOVERY_MODE);
-
-                continue;
             }
         }
         else if (flight_mode == Drone::DroneFlightMode::FOLLOW_MODE)
@@ -256,7 +264,7 @@ void run_drone()
             if (is_tracking)
             {
                 roll = pid_x->output;
-                throttle = 350 + pid_y->output;
+                throttle = Drone::DISABLE_VALUE + 350 + pid_y->output;
                 pitch = pid_z->output;
             }
             else if (!is_tracking && lost_tracking)
@@ -267,7 +275,7 @@ void run_drone()
                 {
                     to_mode(Drone::DroneFlightMode::HOVER_MODE);
 
-                    continue;
+                    goto cleanup;
                 }
             }
         }
@@ -280,32 +288,11 @@ void run_drone()
 
         set_receiver_values(serial, armed, throttle, pitch, roll);
 
-        if (duration_cast<milliseconds>(high_resolution_clock::now() - telem_start).count() >= 200)
-        {
-            telem_start = high_resolution_clock::now();
+cleanup:
+        if (status != NULL) delete[] status;
 
-            auto rc = Msp::receive_parameters<Msp::MspReceiver>(serial, Msp::MspCommand::RC);
-            auto motor = Msp::receive_parameters<Msp::MspMotor>(serial, Msp::MspCommand::MOTOR);
-
-            json o;
-            o["receiver"] = *rc;
-            o["motors"] = *motor;
-            o["pids"]["x"] = std::map<std::string, double>{ {"set_point", pid_x->feedback_value}, {"curr_value", pid_x->output} };
-            o["pids"]["y"] = std::map<std::string, double>{ {"set_point", pid_y->feedback_value}, {"curr_value", pid_y->output} };
-            o["pids"]["z"] = std::map<std::string, double>{ {"set_point", pid_z->feedback_value}, {"curr_value", pid_z->output} };
-
-            queue_ws_broadcast(o.dump());
-
-            delete[] rc;
-            delete[] motor;
-        }
-
-        delete[] status;
-
-        std::this_thread::sleep_for(milliseconds(10));
-    }
-
-    serial->Close();
+        // std::this_thread::sleep_for(milliseconds(10));
+    // }
 }
 
 void run_detection()
@@ -467,6 +454,8 @@ void run_detection()
         }
 
         // const int key = cv::waitKey(1);
+
+        run_drone();
     }
 }
 

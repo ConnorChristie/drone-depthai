@@ -373,8 +373,8 @@ namespace ce {
         if (parity == 'O') settings.c_cflag |= PARODD;
         if (parity == 'N') settings.c_iflag = IGNPAR;
 
-        settings.c_cc[VMIN] = 1;
-        settings.c_cc[VTIME] = 0;
+        settings.c_cc[VMIN] = 0;
+        settings.c_cc[VTIME] = 1;
 
         cfsetospeed(&settings, baud);
         cfsetispeed(&settings, baud);
