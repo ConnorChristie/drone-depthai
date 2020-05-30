@@ -28,15 +28,27 @@ extern volatile sig_atomic_t is_running;
 namespace Drone
 {
 
+#define DroneFlightMode_Macro \
+    X(PENDING_INIT,        0) \
+    X(RECOVERY_MODE,       1) \
+    X(FLY_UP_MODE,         2) \
+    X(HOVER_MODE,          3) \
+    X(FOLLOW_MODE,         4) \
+    X(FLY_UP_AND_DETECTED, 5)
+
+#define X(flag, value) flag = value,
 enum DroneFlightMode
 {
-    PENDING_INIT = 0,
-    RECOVERY_MODE = 1,
-    FLY_UP_MODE = 2,
-    HOVER_MODE = 3,
-    FOLLOW_MODE = 4,
-    FLY_UP_AND_DETECTED = 5,
+    DroneFlightMode_Macro
 };
+#undef X
+
+#define X(flag, value) #flag,
+static char const* DroneFlightMode_Name[] =
+{
+    DroneFlightMode_Macro
+};
+#undef X
 
 constexpr uint16_t LOOP_SLEEP_TIME = 2;
 constexpr uint16_t HOVER_TIMEOUT   = 10000;

@@ -231,7 +231,7 @@ struct MspStatusEx
     uint16_t sensor;
     uint32_t initial_flight_mode_flags;
     uint8_t  current_pid_profile_index;
-    
+
     uint16_t average_system_load_percent;
     uint8_t  pid_profile_count;
     uint8_t  current_control_rate_profile_index;
@@ -241,6 +241,7 @@ struct MspStatusEx
     uint32_t arming_flags;
     uint8_t  reboot_required;
 };
+void to_json(json& j, const MspStatusEx& d);
 
 struct MspStatus
 {

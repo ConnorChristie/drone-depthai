@@ -35,10 +35,10 @@ void print_bytes(char* data, size_t length)
 }
 
 #define CLEAR_AMOUNT 128
+char buf[CLEAR_AMOUNT];
 
 void drain_read_buffer(ceSerial* serial)
 {
-    char buf[CLEAR_AMOUNT];
     auto drained_amount = serial->Read(buf, CLEAR_AMOUNT);
 
     std::cout << "Drained " << drained_amount << " bytes from read buffer." << std::endl;
@@ -97,6 +97,7 @@ char* send_raw_command(ceSerial* serial, MspCommand command, char* param_data, u
     {
         std::cout << "Error writing " << (int)data_size << " only wrote " << (int)write_length << std::endl;
         print_bytes(data, data_size);
+
         return NULL;
     }
 
@@ -131,6 +132,8 @@ char* send_raw_command(ceSerial* serial, MspCommand command, char* param_data, u
         std::cout << "Error reading " << (int)rcv_size << " only read " << (int)read_length << " (response told us to read " << (int)rcv_request->size << " bytes)" << std::endl;
         print_bytes(rcv_data, rcv_size);
         drain_read_buffer(serial);
+
+        delete[] rcv_data;
         return NULL;
     }
 
@@ -140,6 +143,8 @@ char* send_raw_command(ceSerial* serial, MspCommand command, char* param_data, u
         std::cout << "Was expecting a response to our request but received different" << std::endl;
         print_bytes(rcv_data, rcv_size);
         drain_read_buffer(serial);
+
+        delete[] rcv_data;
         return NULL;
     }
 
@@ -148,6 +153,8 @@ char* send_raw_command(ceSerial* serial, MspCommand command, char* param_data, u
         std::cout << "Was expecting a response size of " << (int)rcv_param_size << " but received " << (int)rcv_request->size << " instead" << std::endl;
         print_bytes(rcv_data, rcv_size);
         drain_read_buffer(serial);
+
+        delete[] rcv_data;
         return NULL;
     }
 
@@ -161,11 +168,12 @@ char* send_raw_command(ceSerial* serial, MspCommand command, char* param_data, u
     if (calc_crc != actual_crc)
     {
         std::cout << "Bad checksum: calculated " << (int)calc_crc << ", recv " << (int)actual_crc << std::endl;
+
+        delete[] rcv_data;
         return NULL;
     }
 
     delete[] rcv_data;
-
     return rcv_params;
 }
 
@@ -198,7 +206,26 @@ void to_json(json& j, const MspReceiver& d)
         {"aux_11", d.aux_11},
         {"aux_12", d.aux_12},
         {"aux_13", d.aux_13},
-        {"aux_14", d.aux_14},
+        {"aux_14", d.aux_14}
+    };
+}
+
+void to_json(json& j, const MspStatusEx& d)
+{
+    j = json
+    {
+        {"cycle_time", d.cycle_time},
+        {"i2c_error_counter", d.i2c_error_counter},
+        {"sensor", d.sensor},
+        {"initial_flight_mode_flags", d.initial_flight_mode_flags},
+        {"current_pid_profile_index", d.current_pid_profile_index},
+        {"average_system_load_percent", d.average_system_load_percent},
+        {"pid_profile_count", d.pid_profile_count},
+        {"current_control_rate_profile_index", d.current_control_rate_profile_index},
+        {"additional_flight_mode_flags_count", d.additional_flight_mode_flags_count},
+        {"arming_flags_count", d.arming_flags_count},
+        {"arming_flags", d.arming_flags},
+        {"reboot_required", d.reboot_required}
     };
 }
 

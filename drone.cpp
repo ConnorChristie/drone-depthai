@@ -1,6 +1,8 @@
 #include "drone.h"
 
-#define SHOW_PREVIEW false
+// #define SHOW_PREVIEW
+#define TELEM_INTERVAL 200
+#define REMOTE_COMMS_TIMEOUT 500
 
 ceSerial* serial;
 
@@ -94,12 +96,13 @@ bool armed = false;
 bool remote_armed = false;
 auto flight_mode = Drone::DroneFlightMode::RECOVERY_MODE;
 auto task_start = high_resolution_clock::now();
+auto last_remote_comm = high_resolution_clock::now();
 
 int throttle = 0;
 
 void to_mode(Drone::DroneFlightMode mode)
 {
-    std::cout << "State transition: " << flight_mode << " -> " << mode << "\n";
+    std::cout << "State transition: " << Drone::DroneFlightMode_Name[flight_mode] << " -> " << Drone::DroneFlightMode_Name[mode] << "\n";
 
     flight_mode = mode;
     task_start = high_resolution_clock::now();
@@ -120,27 +123,7 @@ void run_drone()
         auto dt = duration_cast<milliseconds>(now - t0).count();
         t0 = now;
 
-        if (duration_cast<milliseconds>(high_resolution_clock::now() - telem_start).count() >= 200)
-        {
-            telem_start = high_resolution_clock::now();
-
-            auto rc = Msp::receive_parameters<Msp::MspReceiver>(serial, Msp::MspCommand::RC);
-            auto motor = Msp::receive_parameters<Msp::MspMotor>(serial, Msp::MspCommand::MOTOR);
-
-            json o;
-            o["receiver"] = *rc;
-            o["motors"] = *motor;
-            o["pids"]["x"] = std::map<std::string, double>{ {"set_point", pid_x->feedback_value}, {"curr_value", pid_x->output} };
-            o["pids"]["y"] = std::map<std::string, double>{ {"set_point", pid_y->feedback_value}, {"curr_value", pid_y->output} };
-            o["pids"]["z"] = std::map<std::string, double>{ {"set_point", pid_z->feedback_value}, {"curr_value", pid_z->output} };
-
-            queue_ws_broadcast(o.dump());
-
-            delete[] rc;
-            delete[] motor;
-        }
-
-        // std::cout << "Drone Elapsed: " << dt << "\n";
+        std::cout << "Drone Elapsed: " << dt << "\n";
 
         std::experimental::optional<Drone::DroneReceiver> remote_controls;
 
@@ -173,6 +156,8 @@ void run_drone()
                 {
                     remote_controls = json_obj["channels"].get<Drone::DroneReceiver>();
                     remote_armed = (*remote_controls).arm_mode > 1500;
+
+                    last_remote_comm = now;
                 }
             }
         }
@@ -184,7 +169,36 @@ void run_drone()
 
         if (status == NULL)
         {
-            goto cleanup;
+            return;
+        }
+
+        if (duration_cast<milliseconds>(now - telem_start).count() >= TELEM_INTERVAL)
+        {
+            telem_start = now;
+
+            auto rc = Msp::receive_parameters<Msp::MspReceiver>(serial, Msp::MspCommand::RC);
+            auto motor = Msp::receive_parameters<Msp::MspMotor>(serial, Msp::MspCommand::MOTOR);
+
+            json o;
+            o["receiver"] = *rc;
+            o["motors"] = *motor;
+            o["pids"]["x"] = std::map<std::string, double>{ {"set_point", pid_x->feedback_value}, {"curr_value", pid_x->output} };
+            o["pids"]["y"] = std::map<std::string, double>{ {"set_point", pid_y->feedback_value}, {"curr_value", pid_y->output} };
+            o["pids"]["z"] = std::map<std::string, double>{ {"set_point", pid_z->feedback_value}, {"curr_value", pid_z->output} };
+
+            queue_ws_broadcast(o.dump());
+
+            delete[] rc;
+            delete[] motor;
+        }
+
+        auto remote_comm_elapsed = duration_cast<milliseconds>(now - last_remote_comm).count();
+
+        if (remote_armed && remote_comm_elapsed >= REMOTE_COMMS_TIMEOUT)
+        {
+            remote_armed = false;
+
+            std::cout << "Lost communication with remote controls after " << REMOTE_COMMS_TIMEOUT << "ms. Disarming\n";
         }
 
         if (!remote_armed)
@@ -193,7 +207,8 @@ void run_drone()
 
             set_receiver_values(serial, remote_armed, Drone::DISABLE_VALUE, 0, 0);
 
-            goto cleanup;
+            delete[] status;
+            return;
         }
 
         if ((status->arming_flags & Msp::MspArmingDisableFlags::ARMING_DISABLED_RX_FAILSAFE) == Msp::MspArmingDisableFlags::ARMING_DISABLED_RX_FAILSAFE
@@ -205,6 +220,8 @@ void run_drone()
         {
             to_mode(Drone::DroneFlightMode::FLY_UP_MODE);
         }
+
+        delete[] status;
 
         if (flight_mode == Drone::DroneFlightMode::RECOVERY_MODE)
         {
@@ -219,7 +236,7 @@ void run_drone()
             {
                 to_mode(Drone::DroneFlightMode::FLY_UP_AND_DETECTED);
 
-                goto cleanup;
+                return;
             }
             else
             {
@@ -236,24 +253,26 @@ void run_drone()
 
             if (is_tracking && started_tracking)
             {
-                auto tracking_elapsed = duration_cast<milliseconds>(high_resolution_clock::now() - started_tracking.value()).count();
+                auto tracking_elapsed = duration_cast<milliseconds>(now - started_tracking.value()).count();
 
                 if (tracking_elapsed >= 10)
                 {
+                    // After 10ms of tracking and flying up, move to follow mode
                     to_mode(Drone::DroneFlightMode::FOLLOW_MODE);
 
-                    goto cleanup;
+                    return;
                 }
             }
             else if (!is_tracking && lost_tracking)
             {
-                auto lost_tracking_elapsed = duration_cast<milliseconds>(high_resolution_clock::now() - lost_tracking.value()).count();
+                auto lost_tracking_elapsed = duration_cast<milliseconds>(now - lost_tracking.value()).count();
 
                 if (lost_tracking_elapsed >= 50)
                 {
+                    // Else after 50ms of no detection, go back to fly up mode
                     to_mode(Drone::DroneFlightMode::FLY_UP_MODE);
 
-                    goto cleanup;
+                    return;
                 }
             }
         }
@@ -269,27 +288,39 @@ void run_drone()
             }
             else if (!is_tracking && lost_tracking)
             {
-                auto lost_tracking_elapsed = duration_cast<seconds>(high_resolution_clock::now() - lost_tracking.value()).count();
+                auto lost_tracking_elapsed = duration_cast<seconds>(now - lost_tracking.value()).count();
 
                 if (lost_tracking_elapsed >= 10)
                 {
+                    // Start hovering after 10ms of lost detection
                     to_mode(Drone::DroneFlightMode::HOVER_MODE);
 
-                    goto cleanup;
+                    return;
                 }
             }
         }
-
-        if (flight_mode == Drone::DroneFlightMode::HOVER_MODE)
+        else if (flight_mode == Drone::DroneFlightMode::HOVER_MODE)
         {
-            // Use last throttle
-            armed = true;
+            if (is_tracking && started_tracking)
+            {
+                auto tracking_elapsed = duration_cast<milliseconds>(now - started_tracking.value()).count();
+
+                if (tracking_elapsed >= 10)
+                {
+                    // After 10ms of tracking and flying up, move to follow mode
+                    to_mode(Drone::DroneFlightMode::FOLLOW_MODE);
+
+                    return;
+                }
+            }
+            else
+            {
+                // Use last throttle
+                armed = true;
+            }
         }
 
         set_receiver_values(serial, armed, throttle, pitch, roll);
-
-cleanup:
-        if (status != NULL) delete[] status;
 
         // std::this_thread::sleep_for(milliseconds(10));
     // }
@@ -372,6 +403,7 @@ void run_detection()
             }
         }
 
+#ifdef SHOW_PREVIEW
         for (auto it = data_packets.begin(); it != data_packets.end(); ++it)
         {
             if ((*it)->stream_name == "previewout")
@@ -381,38 +413,36 @@ void run_detection()
                 nn_img_height = dims.at(1);
                 nn_img_width = dims.at(2);
 
-                if (SHOW_PREVIEW)
+                void* img_data_ptr = (void*) data;
+                int channel_size = nn_img_height * nn_img_width;
+
+                cv::Mat R(nn_img_height, nn_img_width, CV_8UC1, img_data_ptr);
+                cv::Mat G(nn_img_height, nn_img_width, CV_8UC1, img_data_ptr + channel_size);
+                cv::Mat B(nn_img_height, nn_img_width, CV_8UC1, img_data_ptr + channel_size * 2);
+
+                std::vector<cv::Mat> channels;
+                channels.push_back(R);
+                channels.push_back(G);
+                channels.push_back(B);
+
+                cv::Mat frame;
+                cv::merge(channels, frame);
+
+                for (auto i = 0; i < detections.size(); i++)
                 {
-                    void* img_data_ptr = (void*) data;
-                    int channel_size = nn_img_height * nn_img_width;
+                    auto d = &detections[i];
 
-                    cv::Mat R(nn_img_height, nn_img_width, CV_8UC1, img_data_ptr);
-                    cv::Mat G(nn_img_height, nn_img_width, CV_8UC1, img_data_ptr + channel_size);
-                    cv::Mat B(nn_img_height, nn_img_width, CV_8UC1, img_data_ptr + channel_size * 2);
+                    cv::rectangle(frame, cv::Point2f(d->left, d->top), cv::Point2f(d->right, d->bottom), cv::Scalar(23, 23, 255));
 
-                    std::vector<cv::Mat> channels;
-                    channels.push_back(R);
-                    channels.push_back(G);
-                    channels.push_back(B);
-
-                    cv::Mat frame;
-                    cv::merge(channels, frame);
-
-                    for (auto i = 0; i < detections.size(); i++)
-                    {
-                        auto d = &detections[i];
-
-                        cv::rectangle(frame, cv::Point2f(d->left, d->top), cv::Point2f(d->right, d->bottom), cv::Scalar(23, 23, 255));
-
-                        cv::putText(frame, str(format("label: %1%") % d->label), cv::Point2f(d->left, d->top + 20), cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 255));
-                        cv::putText(frame, str(format("%1% %%") % (d->confidence * 100)), cv::Point2f(d->left, d->top + 40), cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 255));
-                        cv::putText(frame, str(format("z: %1%") % d->distance_z), cv::Point2f(d->left, d->top + 60), cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 255));
-                    }
-
-                    cv::imshow("previewout", frame);
+                    cv::putText(frame, str(format("label: %1%") % d->label), cv::Point2f(d->left, d->top + 20), cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 255));
+                    cv::putText(frame, str(format("%1% %%") % (d->confidence * 100)), cv::Point2f(d->left, d->top + 40), cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 255));
+                    cv::putText(frame, str(format("z: %1%") % d->distance_z), cv::Point2f(d->left, d->top + 60), cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 255));
                 }
+
+                cv::imshow("previewout", frame);
             }
         }
+#endif
 
         bool has_detections = !detections.empty();
 
@@ -425,11 +455,11 @@ void run_detection()
             });
         }
 
-        // Just started tracking
+         // Just started tracking
         if (!is_tracking && has_detections)
         {
             is_tracking = true;
-            started_tracking = high_resolution_clock::now();
+            started_tracking = now;
             lost_tracking = std::experimental::nullopt;
         }
         // Lost tracking
@@ -439,41 +469,27 @@ void run_detection()
 
             is_tracking = false;
             started_tracking = std::experimental::nullopt;
-            lost_tracking = high_resolution_clock::now();
+            lost_tracking = now;
         }
 
         if (is_tracking)
         {
             auto best_detection = &detections[0];
+            auto z = best_detection->distance_z * 100.0;
 
-            std::cout << "Center: " << best_detection->distance_z << "\n";
+            std::cout << "Center: " << z << "\n";
 
             pid_x->update(best_detection->center_x - (nn_img_width / 2.0));
             pid_y->update(best_detection->center_y - (nn_img_height / 2.0));
-            pid_z->update(best_detection->distance_z * 100);
+            pid_z->update(z);
         }
 
-        // const int key = cv::waitKey(1);
+#ifdef SHOW_PREVIEW
+        const int key = cv::waitKey(1);
+#endif
 
         run_drone();
     }
-}
-
-void to_json(json& j, const Detection& d)
-{
-    j = json
-    {
-        {"label", d.label},
-        {"confidence", d.confidence},
-        {"left", d.left},
-        {"top", d.top},
-        {"right", d.right},
-        {"bottom", d.bottom},
-        {"center_x", d.center_x},
-        {"center_y", d.center_y},
-        {"distance_z", d.distance_z},
-        {"size", d.size},
-    };
 }
 
 namespace Drone
