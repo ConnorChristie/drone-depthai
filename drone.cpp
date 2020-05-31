@@ -76,14 +76,14 @@ inline double curve_fn(double x)
     return ACCEL_FACTOR * log10((x + DIVISION_FACTOR) / DIVISION_FACTOR);
 }
 
-void set_receiver_values(ceSerial *serial, bool armed, int throttle, int pitch, int roll)
+void set_receiver_values(ceSerial *serial, bool armed, int throttle, int pitch, int roll, int yaw)
 {
     Drone::DroneReceiver params =
     {
         .roll        = (uint16_t)(Drone::MIDDLE_VALUE + roll),
         .pitch       = (uint16_t)(Drone::MIDDLE_VALUE + pitch),
         .throttle    = (uint16_t)(throttle),
-        .yaw         = Drone::MIDDLE_VALUE,
+        .yaw         = (uint16_t)(Drone::MIDDLE_VALUE + yaw),
         .flight_mode = Drone::DISABLE_VALUE, // DISABLE = Horizon mode
         .aux_2       = Drone::MIDDLE_VALUE,
         .arm_mode    = (armed ? Drone::ENABLE_VALUE : Drone::DISABLE_VALUE)
@@ -162,8 +162,9 @@ void run_drone()
             }
         }
 
-        int pitch = 0;
         int roll = 0;
+        int pitch = 0;
+        int yaw = 0;
 
         Msp::MspStatusEx *status = Msp::receive_parameters<Msp::MspStatusEx>(serial, Msp::MspCommand::STATUS_EX);
 
@@ -205,7 +206,7 @@ void run_drone()
         {
             flight_mode = Drone::DroneFlightMode::RECOVERY_MODE;
 
-            set_receiver_values(serial, remote_armed, Drone::DISABLE_VALUE, 0, 0);
+            set_receiver_values(serial, remote_armed, Drone::DISABLE_VALUE, 0, 0, 0);
 
             delete[] status;
             continue;
@@ -282,8 +283,16 @@ void run_drone()
 
             if (is_tracking)
             {
-                roll = pid_x->output;
-                throttle = Drone::DISABLE_VALUE + 350 + pid_y->output;
+                // roll = pid_x->output;
+                // throttle = Drone::DISABLE_VALUE + 350 + pid_y->output;
+
+                if (remote_controls)
+                {
+                    throttle = (*remote_controls).throttle;
+                    yaw = (*remote_controls).yaw - Drone::MIDDLE_VALUE;
+                    roll = (*remote_controls).roll - Drone::MIDDLE_VALUE;
+                }
+
                 pitch = pid_z->output;
             }
             else if (!is_tracking && lost_tracking)
@@ -320,9 +329,7 @@ void run_drone()
             }
         }
 
-        set_receiver_values(serial, armed, throttle, pitch, roll);
-
-        // std::this_thread::sleep_for(milliseconds(10));
+        set_receiver_values(serial, armed, throttle, pitch, roll, yaw);
     }
 }
 
