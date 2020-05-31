@@ -117,8 +117,8 @@ void to_mode(Drone::DroneFlightMode mode)
 
 void run_drone()
 {
-    // while (is_running)
-    // {
+    while (is_running)
+    {
         auto now = high_resolution_clock::now();
         auto dt = duration_cast<milliseconds>(now - t0).count();
         t0 = now;
@@ -169,12 +169,12 @@ void run_drone()
 
         if (status == NULL)
         {
-            return;
+            continue;
         }
 
-        if (duration_cast<milliseconds>(now - telem_start).count() >= TELEM_INTERVAL)
+        // if (duration_cast<milliseconds>(now - telem_start).count() >= TELEM_INTERVAL)
         {
-            telem_start = now;
+        //     telem_start = now;
 
             auto rc = Msp::receive_parameters<Msp::MspReceiver>(serial, Msp::MspCommand::RC);
             auto motor = Msp::receive_parameters<Msp::MspMotor>(serial, Msp::MspCommand::MOTOR);
@@ -182,9 +182,9 @@ void run_drone()
             json o;
             o["receiver"] = *rc;
             o["motors"] = *motor;
-            o["pids"]["x"] = std::map<std::string, double>{ {"set_point", pid_x->feedback_value}, {"curr_value", pid_x->output} };
-            o["pids"]["y"] = std::map<std::string, double>{ {"set_point", pid_y->feedback_value}, {"curr_value", pid_y->output} };
-            o["pids"]["z"] = std::map<std::string, double>{ {"set_point", pid_z->feedback_value}, {"curr_value", pid_z->output} };
+            o["pids"]["x"] = std::map<std::string, double>{ {"set_point", pid_x->_prev_measurement}, {"curr_value", pid_x->output} };
+            o["pids"]["y"] = std::map<std::string, double>{ {"set_point", pid_y->_prev_measurement}, {"curr_value", pid_y->output} };
+            o["pids"]["z"] = std::map<std::string, double>{ {"set_point", pid_z->_prev_measurement}, {"curr_value", pid_z->output} };
 
             queue_ws_broadcast(o.dump());
 
@@ -208,7 +208,7 @@ void run_drone()
             set_receiver_values(serial, remote_armed, Drone::DISABLE_VALUE, 0, 0);
 
             delete[] status;
-            return;
+            continue;
         }
 
         if ((status->arming_flags & Msp::MspArmingDisableFlags::ARMING_DISABLED_RX_FAILSAFE) == Msp::MspArmingDisableFlags::ARMING_DISABLED_RX_FAILSAFE
@@ -236,7 +236,7 @@ void run_drone()
             {
                 to_mode(Drone::DroneFlightMode::FLY_UP_AND_DETECTED);
 
-                return;
+                continue;
             }
             else
             {
@@ -260,7 +260,7 @@ void run_drone()
                     // After 10ms of tracking and flying up, move to follow mode
                     to_mode(Drone::DroneFlightMode::FOLLOW_MODE);
 
-                    return;
+                    continue;
                 }
             }
             else if (!is_tracking && lost_tracking)
@@ -272,7 +272,7 @@ void run_drone()
                     // Else after 50ms of no detection, go back to fly up mode
                     to_mode(Drone::DroneFlightMode::FLY_UP_MODE);
 
-                    return;
+                    continue;
                 }
             }
         }
@@ -295,7 +295,7 @@ void run_drone()
                     // Start hovering after 10ms of lost detection
                     to_mode(Drone::DroneFlightMode::HOVER_MODE);
 
-                    return;
+                    continue;
                 }
             }
         }
@@ -310,7 +310,7 @@ void run_drone()
                     // After 10ms of tracking and flying up, move to follow mode
                     to_mode(Drone::DroneFlightMode::FOLLOW_MODE);
 
-                    return;
+                    continue;
                 }
             }
             else
@@ -323,7 +323,7 @@ void run_drone()
         set_receiver_values(serial, armed, throttle, pitch, roll);
 
         // std::this_thread::sleep_for(milliseconds(10));
-    // }
+    }
 }
 
 void run_detection()
@@ -475,12 +475,12 @@ void run_detection()
         if (is_tracking)
         {
             auto best_detection = &detections[0];
-            auto z = best_detection->distance_z * 100.0;
+            auto z = best_detection->distance_z * 100.0f;
 
-            std::cout << "Center: " << z << "\n";
+            // std::cout << "Center: " << z << "\n";
 
-            pid_x->update(best_detection->center_x - (nn_img_width / 2.0));
-            pid_y->update(best_detection->center_y - (nn_img_height / 2.0));
+            pid_x->update(best_detection->center_x - (nn_img_width / 2.0f));
+            pid_y->update(best_detection->center_y - (nn_img_height / 2.0f));
             pid_z->update(z);
         }
 
@@ -488,7 +488,7 @@ void run_detection()
         const int key = cv::waitKey(1);
 #endif
 
-        run_drone();
+        // run_drone();
     }
 }
 

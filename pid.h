@@ -12,32 +12,35 @@ using json = nlohmann::json;
 
 struct PIDConfig
 {
-    double P;
-    double I;
-    double D;
+    float P;
+    float I;
+    float D;
+    float tau;
 };
 
 class PID
 {
 public:
-    PID(double min, double max, PIDConfig cfg);
+    PID(float min, float max, PIDConfig cfg);
 
-    void update(double feedback_value);
-    void reset(double setpoint);
+    void update(float feedback_value);
+    void reset(float setpoint);
     void reset(PIDConfig config);
 
-    double output;
-    double setpoint;
-    double feedback_value;
+    float output;
+    float setpoint;
+    float _prev_measurement;
 
     PIDConfig cfg;
 
 private:
-    double _max;
-    double _min;
+    float _max;
+    float _min;
 
-    double _pre_error;
-    double _integral;
+    float _prev_error;
+
+    float _integral;
+    float _derivative;
 
     high_resolution_clock::time_point last_time;
 };

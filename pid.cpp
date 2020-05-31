@@ -2,66 +2,84 @@
 
 using namespace std;
 
-PID::PID(double min, double max, PIDConfig cfg) :
-    _max(max),
+PID::PID(float min, float max, PIDConfig cfg) :
     _min(min),
-    _pre_error(0),
-    _integral(0),
-    cfg(cfg),
-    output(0),
-    setpoint(0),
-    feedback_value(0)
+    _max(max)
 {
+    reset(cfg);
 }
 
-void PID::update(double feedback_value)
+void PID::update(float measurement)
 {
-    auto current_time = high_resolution_clock::now();
-    auto dt = duration_cast<milliseconds>(current_time - last_time).count();
-    last_time = current_time;
+    auto now = high_resolution_clock::now();
+    std::chrono::duration<float> duration = now - last_time;
+    float dt = duration.count();;
+    last_time = now;
 
-    this->feedback_value = feedback_value;
+    float error = setpoint - measurement;
 
-    // Calculate error
-    auto error = setpoint - feedback_value;
+    float proportional = cfg.P * error;
 
-    // Proportional term
-    auto Pout = cfg.P * error;
+    _integral = _integral + 0.5f * cfg.I * dt * (error + _prev_error);
 
-    // Integral term
-    _integral += (_pre_error + error / 2) * dt;
-    // auto Iout = cfg.I * _integral;
+    float limMinInt, limMaxInt;
 
-    if (_integral > 30000) _integral = 30000;
-    if (_integral < -30000) _integral = -30000;
+    if (proportional < _max)
+    {
+        limMaxInt = _max - proportional;
+    }
+    else
+    {
+        limMaxInt = 0;
+    }
 
-    // Derivative term
-    auto derivative = (error - _pre_error) / dt;
-    // auto Dout = cfg.D * derivative;
+    if (proportional > _min)
+    {
+        limMinInt = _min - proportional;
+    }
+    else
+    {
+        limMinInt = 0;
+    }
 
-    // Calculate total output
-    // auto _output = Pout + Iout + Dout;
+    if (_integral > limMaxInt)
+    {
+        _integral = limMaxInt;
+    }
+    else if (_integral < limMinInt)
+    {
+        _integral = limMinInt;
+    }
 
-    output = (error * cfg.P) + (_integral * cfg.I) + (derivative * cfg.D);
+    _derivative = (2.0f * cfg.D * (measurement - _prev_measurement) + (2.0f * cfg.tau - dt) * _derivative)
+                / (2.0f * cfg.tau + dt);
 
-    // Restrict to max/min
-    if (output > _max)
+    float out = proportional + _integral + _derivative;
+
+    if (out > _max)
+    {
         output = _max;
-    else if (output < _min)
-        output = _min;
+    }
+    else if (out < _min)
+    {
+        out = _min;
+    }
 
-    // Save error to previous error
-    _pre_error = error;
+    _prev_error = error;
+    _prev_measurement = measurement;
+
+    output = out;
 }
 
-void PID::reset(double setpoint)
+void PID::reset(float setpoint)
 {
-    this->output = 0;
-    this->setpoint = setpoint;
-    this->feedback_value = 0;
-    this->_pre_error = 0;
-    this->_integral = 0;
+    _prev_error = 0;
+    _prev_measurement = 0;
+    _integral = 0;
+    _derivative = 0;
+    output = 0;
 
+    this->setpoint = setpoint;
     this->last_time = high_resolution_clock::now();
 }
 
@@ -78,7 +96,8 @@ void to_json(json& j, const PIDConfig& d)
     {
         {"P", d.P},
         {"I", d.I},
-        {"D", d.D}
+        {"D", d.D},
+        {"tau", d.tau}
     };
 }
 
@@ -87,4 +106,5 @@ void from_json(const json& j, PIDConfig& d)
     j.at("P").get_to(d.P);
     j.at("I").get_to(d.I);
     j.at("D").get_to(d.D);
+    j.at("tau").get_to(d.tau);
 }
