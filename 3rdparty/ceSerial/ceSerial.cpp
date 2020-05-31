@@ -11,55 +11,15 @@
 // http://www.cplusplus.com/forum/unices/10491/
 
 #include "ceSerial.h"
-#include <stdlib.h>
-#include <stdio.h>
-#include <string>
-#include <string.h>
 
 using namespace std;
 
-#ifdef ceWINDOWS
-#define READ_TIMEOUT 10      // milliseconds
-#else
-#include <unistd.h>
-#include <fcntl.h>
-#include <termios.h>
-#include <sys/ioctl.h>
-#include <errno.h>
-#endif
-
-namespace ce {
-
-    void ceSerial::Delay(unsigned long ms) {
-#ifdef ceWINDOWS
-        Sleep(ms);
-#else
-        usleep(ms * 1000);
-#endif
-    }
-
-    ceSerial::ceSerial()
-    {
-#ifdef ceWINDOWS
-        hComm = INVALID_HANDLE_VALUE;
-        port = "\\\\.\\COM1";
-#else
-        fd = -1;
-        port = "/dev/serial0";
-#endif // defined
-        SetBaudRate(9600);
-        SetDataSize(8);
-        SetParity('N');
-        SetStopBits(1);
-    }
+namespace ce
+{
 
     ceSerial::ceSerial(string Device, long BaudRate, long DataSize, char ParityType, float NStopBits)
     {
-#ifdef ceWINDOWS
-        hComm = INVALID_HANDLE_VALUE;
-#else
         fd = -1;
-#endif // defined
         port = Device;
         SetBaudRate(BaudRate);
         SetDataSize(DataSize);
@@ -91,11 +51,7 @@ namespace ce {
 
     void ceSerial::SetParity(char p) {
         if ((p != 'N') && (p != 'E') && (p != 'O')) {
-#ifdef ceWINDOWS
-            if ((p != 'M') && (p != 'S')) p = 'N';
-#else
             p = 'N';
-#endif
         }
         parity = p;
     }
@@ -106,242 +62,12 @@ namespace ce {
 
     void ceSerial::SetStopBits(float nbits) {
         if (nbits >= 2) stopbits = 2;
-#ifdef ceWINDOWS
-        else if (nbits >= 1.5) stopbits = 1.5;
-#endif
         else stopbits = 1;
     }
 
     float ceSerial::GetStopBits() {
         return stopbits;
     }
-
-
-#ifdef ceWINDOWS
-
-    void ceSerial::SetBaudRate(long baudrate) {
-        if (baudrate < 300) baud = CBR_110;
-        else if (baudrate < 600) baud = CBR_300;
-        else if (baudrate < 1200) baud = CBR_600;
-        else if (baudrate < 2400) baud = CBR_1200;
-        else if (baudrate < 4800) baud = CBR_2400;
-        else if (baudrate < 9600) baud = CBR_4800;
-        else if (baudrate < 14400) baud = CBR_9600;
-        else if (baudrate < 19200) baud = CBR_14400;
-        else if (baudrate < 38400) baud = CBR_19200;
-        else if (baudrate < 57600) baud = CBR_38400;
-        else if (baudrate < 115200) baud = CBR_57600;
-        else if (baudrate < 128000) baud = CBR_115200;
-        else if (baudrate < 256000) baud = CBR_128000;
-        else baud = CBR_256000;
-    }
-
-    long ceSerial::GetBaudRate() {
-        return baud;
-    }
-
-    long ceSerial::Open()
-    {
-        if (IsOpened()) return 0;
-#ifdef UNICODE
-        wstring wtext(port.begin(), port.end());
-#else
-        string wtext = port;
-#endif
-        hComm = CreateFile(wtext.c_str(),
-            GENERIC_READ | GENERIC_WRITE,
-            0,
-            0,
-            OPEN_EXISTING,
-            FILE_ATTRIBUTE_NORMAL,
-            0);
-        if (hComm == INVALID_HANDLE_VALUE) { return 1; }
-
-        //get initial state
-        DCB dcbOri;
-        bool fSuccess;
-        fSuccess = GetCommState(hComm, &dcbOri);
-        if (!fSuccess) { return 3; }
-
-        DCB dcb1 = dcbOri;
-
-        dcb1.BaudRate = baud;
-
-        if (parity == 'E') dcb1.Parity = EVENPARITY;
-        else if (parity == 'O') dcb1.Parity = ODDPARITY;
-        else if (parity == 'M') dcb1.Parity = MARKPARITY;
-        else if (parity == 'S') dcb1.Parity = SPACEPARITY;
-        else dcb1.Parity = NOPARITY;
-
-        dcb1.ByteSize = (BYTE)dsize;
-
-        if (stopbits == 2) dcb1.StopBits = TWOSTOPBITS;
-        else if (stopbits == 1.5) dcb1.StopBits = ONE5STOPBITS;
-        else dcb1.StopBits = ONESTOPBIT;
-
-        dcb1.fOutxCtsFlow = false;
-        dcb1.fOutxDsrFlow = false;
-        dcb1.fOutX = false;
-        dcb1.fDtrControl = DTR_CONTROL_DISABLE;
-        dcb1.fRtsControl = RTS_CONTROL_DISABLE;
-        fSuccess = SetCommState(hComm, &dcb1);
-        this->Delay(60);
-        if (!fSuccess) { return 4; }
-
-        fSuccess = GetCommState(hComm, &dcb1);
-        if (!fSuccess) { return 5; }
-
-        if (!GetCommTimeouts(hComm, &timeouts_ori)) { return 8; } // Error getting time-outs.
-        COMMTIMEOUTS timeouts;
-        timeouts.ReadIntervalTimeout = 20;
-        timeouts.ReadTotalTimeoutMultiplier = 15;
-        timeouts.ReadTotalTimeoutConstant = 100;
-        timeouts.WriteTotalTimeoutMultiplier = 15;
-        timeouts.WriteTotalTimeoutConstant = 100;
-        if (!SetCommTimeouts(hComm, &timeouts)) { return 9; } // Error setting time-outs.
-        return 0;
-    }
-
-    void ceSerial::Close()
-    {
-        if (IsOpened())
-        {
-            SetCommTimeouts(hComm, &timeouts_ori);
-            CloseHandle(hComm);//close comm port
-            hComm = INVALID_HANDLE_VALUE;
-        }
-    }
-
-    bool ceSerial::IsOpened()
-    {
-        if (hComm == INVALID_HANDLE_VALUE) return false;
-        else return true;
-    }
-
-    bool ceSerial::Flush()
-    {
-        if (!IsOpened()) {
-            return false;
-        }
-        return FlushFileBuffers(hComm);
-    }
-
-    size_t ceSerial::Write(char* data, size_t length)
-    {
-        if (!IsOpened()) {
-            return false;
-        }
-        DWORD bytes_written;
-
-        // Issue write.
-        if (!WriteFile(hComm, data, static_cast<DWORD>(length), &bytes_written, NULL))
-        {
-            return -1;
-        }
-
-        return (size_t)bytes_written;
-    }
-
-    size_t ceSerial::Read(char* buf, size_t size)
-    {
-        if (!IsOpened())
-        {
-            return 0;
-        }
-
-        DWORD bytes_read;
-        if (!ReadFile(hComm, buf, static_cast<DWORD>(size), &bytes_read, NULL))
-        {
-            return -1;
-        }
-        return (size_t)bytes_read;
-    }
-
-    bool ceSerial::SetRTS(bool value)
-    {
-        bool r = false;
-        if (IsOpened()) {
-            if (value) {
-                if (EscapeCommFunction(hComm, SETRTS)) r = true;
-            }
-            else {
-                if (EscapeCommFunction(hComm, CLRRTS)) r = true;
-            }
-        }
-        return r;
-    }
-
-    bool ceSerial::SetDTR(bool value)
-    {
-        bool r = false;
-        if (IsOpened()) {
-            if (value) {
-                if (EscapeCommFunction(hComm, SETDTR)) r = true;
-            }
-            else {
-                if (EscapeCommFunction(hComm, CLRDTR)) r = true;
-            }
-        }
-        return r;
-    }
-
-    bool ceSerial::GetCTS(bool& success)
-    {
-        success = false;
-        bool r = false;
-        if (IsOpened()) {
-            DWORD dwModemStatus;
-            if (GetCommModemStatus(hComm, &dwModemStatus)) {
-                r = MS_CTS_ON & dwModemStatus;
-                success = true;
-            }
-        }
-        return r;
-    }
-
-    bool ceSerial::GetDSR(bool& success)
-    {
-        success = false;
-        bool r = false;
-        if (IsOpened()) {
-            DWORD dwModemStatus;
-            if (GetCommModemStatus(hComm, &dwModemStatus)) {
-                r = MS_DSR_ON & dwModemStatus;
-                success = true;
-            }
-        }
-        return r;
-    }
-
-    bool ceSerial::GetRI(bool& success)
-    {
-        success = false;
-        bool r = false;
-        if (IsOpened()) {
-            DWORD dwModemStatus;
-            if (GetCommModemStatus(hComm, &dwModemStatus)) {
-                r = MS_RING_ON & dwModemStatus;
-                success = true;
-            }
-        }
-        return r;
-    }
-
-    bool ceSerial::GetCD(bool& success)
-    {
-        success = false;
-        bool r = false;
-        if (IsOpened()) {
-            DWORD dwModemStatus;
-            if (GetCommModemStatus(hComm, &dwModemStatus)) {
-                r = MS_RLSD_ON & dwModemStatus;
-                success = true;
-            }
-        }
-        return r;
-    }
-
-#else  //for POSIX
 
     long ceSerial::Open(void)
     {
@@ -515,6 +241,5 @@ namespace ce {
         if (ioctl(fd, TIOCMGET, &status) == -1) success = false;
         return ((status & TIOCM_CD) != 0);
     }
-#endif
 
-} // namespace ce 
+}
